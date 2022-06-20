@@ -9,8 +9,8 @@
     <packaging>pom</packaging>
     <version>1.0-SNAPSHOT</version>
     <modules>
-        <module>pro2</module>
-        <module>pro3</module>
+        <module>proj2</module>
+        <module>proj3</module>
     </modules>
 
     <properties>
