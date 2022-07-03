@@ -1,5 +1,8 @@
 package edu.berkeley.cs186.database.concurrency;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * Utility methods to track the relationships between different lock types.
  */
@@ -23,7 +26,34 @@ public enum LockType {
         }
         // TODO(proj4_part1): implement
 
-        return false;
+        //  |     |  S    X    IS    IX    SIX    NL
+        //  -----------------------------------------
+        //  |   S |  T    F     T     F     F     T
+        //  |   X |  F    F     F     F     F     T
+        //  |  IS |  T    F     T     T     T     T
+        //  |  IX |  F    F     T     T     F     T
+        //  | SIX |  F    F     T     F     F     T
+        //  |  NL |  T    T     T     T     T     T
+
+        boolean[][] isCompatible =
+                new boolean[][] {{true, false, true, false, false, true},
+                        {false, false, false, false, false, true},
+                        {true, false, true, true, true, true},
+                        {false, false, true, true, false, true},
+                        {false, false, true, false, false, true},
+                        {true, true, true, true, true, true}};
+        Map<LockType, Integer> map = new HashMap<>();
+        map.put(LockType.S, 0);
+        map.put(LockType.X, 1);
+        map.put(LockType.IS, 2);
+        map.put(LockType.IX, 3);
+        map.put(LockType.SIX, 4);
+        map.put(LockType.NL, 5);
+
+        int numOfA = map.get(a);
+        int numOfB = map.get(b);
+        return isCompatible[numOfA][numOfB];
+
     }
 
     /**
@@ -54,8 +84,18 @@ public enum LockType {
             throw new NullPointerException("null lock type");
         }
         // TODO(proj4_part1): implement
+        switch (parentLockType) {
+            case NL:
+            case S:
+            case X:
+                return childLockType == NL;
+            case IS: return (childLockType == S || childLockType == IS || childLockType == NL);
+            case IX: return true;
+            case SIX: return (childLockType == X || childLockType == IX ||
+                    childLockType == SIX || childLockType == NL);
+            default: throw new UnsupportedOperationException("bad parent LockType");
+        }
 
-        return false;
     }
 
     /**
@@ -69,8 +109,15 @@ public enum LockType {
             throw new NullPointerException("null lock type");
         }
         // TODO(proj4_part1): implement
-
-        return false;
+        switch (required) {
+            case S: return (substitute == S || substitute == X || substitute == SIX);
+            case X: return (substitute == X);
+            case IS: return (substitute != NL);
+            case IX: return (substitute == SIX || substitute == IX || substitute == X);
+            case SIX: return (substitute == SIX || substitute == X);
+            case NL: return true;
+            default: throw new UnsupportedOperationException("bad required LockType");
+        }
     }
 
     /**
