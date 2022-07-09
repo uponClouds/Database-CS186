@@ -42,8 +42,60 @@ public class LockUtil {
         LockType explicitLockType = lockContext.getExplicitLockType(transaction);
 
         // TODO(proj4_part2): implement
-        return;
+        // case 1: The current lock type can effectively substitute the requested type
+        if (LockType.substitutable(effectiveLockType, requestType)) return;
+
+        // case 2: The current lock type is IX and the requested lock is S
+        if (explicitLockType == LockType.IX && requestType == LockType.S) {
+            lockContext.promote(transaction, LockType.SIX);
+            return;
+        }
+
+        // case 3: The current lock type is an intent lock
+        if (explicitLockType.isIntent()) {
+            lockContext.escalate(transaction);
+            explicitLockType = lockContext.getExplicitLockType(transaction);
+            if (explicitLockType == requestType || explicitLockType == LockType.X) return;
+        }
+
+        // case 4: None of the above cases, now the `explicitLockType` can only be S or NL lock
+        if (requestType == LockType.S) {
+            processAncestor(transaction, parentContext, LockType.IS);
+        } else {
+            processAncestor(transaction, parentContext, LockType.IX);
+        }
+
+        if (explicitLockType == LockType.NL) {
+            lockContext.acquire(transaction, requestType);
+        } else {
+            lockContext.promote(transaction, requestType);
+        }
+
     }
 
     // TODO(proj4_part2) add any helper methods you want
+
+    /**
+     * Recursively make the ancestor resource satisfy the lock condition.
+     * @param transaction current transaction.
+     * @param lockContext current lockContext.
+     * @param lockType If the current lock resource meets the conditions,
+     *                 no action is required. Otherwise, replace it with lockType.
+     * @author Gentle He
+     * @date 2022.07.09
+     */
+    private static void processAncestor(TransactionContext transaction,
+                                        LockContext lockContext, LockType lockType) {
+        if (lockContext == null) return;
+        processAncestor(transaction, lockContext.parentContext(), lockType);
+        LockType currLockType = lockContext.getExplicitLockType(transaction);
+        if (!LockType.substitutable(currLockType, lockType)) {
+            if (currLockType == LockType.NL) {
+                lockContext.acquire(transaction, lockType);
+            } else {
+                lockContext.promote(transaction, lockType);
+            }
+        }
+
+    }
 }
