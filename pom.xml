@@ -12,6 +12,7 @@
         <module>proj2</module>
         <module>proj3</module>
         <module>proj4</module>
+        <module>proj5</module>
     </modules>
 
     <properties>
