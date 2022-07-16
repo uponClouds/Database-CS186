@@ -152,13 +152,26 @@ public class ARIESRecoveryManager implements RecoveryManager {
     @Override
     public long end(long transNum) {
         // TODO(proj5): implement
-        TransactionTableEntry tableEntry = transactionTable.get(transNum);
-        Transaction.Status currStatus = tableEntry.transaction.getStatus();
+        TransactionTableEntry transactionEntry = transactionTable.get(transNum);
+        Transaction.Status currStatus = transactionEntry.transaction.getStatus();
 
         if (currStatus == Transaction.Status.ABORTING) {
-
+            // find the LSN to which we should rollback
+            LogRecord record = logManager.fetchLogRecord(transactionEntry.lastLSN);
+            while (record.getPrevLSN().isPresent()) {
+                record = logManager.fetchLogRecord(record.getPrevLSN().get());
+            }
+            rollbackToLSN(transNum, record.getLSN());
         }
-        return -1L;
+        // update status
+        transactionEntry.transaction.setStatus(Transaction.Status.COMPLETE);
+        // add end log record
+        LogRecord endRecord = new EndTransactionLogRecord(transNum, transactionEntry.lastLSN);
+        transactionEntry.lastLSN = logManager.appendToLog(endRecord);
+        // remove transaction from transaction table
+        transactionTable.remove(transNum);
+
+        return transactionEntry.lastLSN;
     }
 
     /**
@@ -193,13 +206,17 @@ public class ARIESRecoveryManager implements RecoveryManager {
             // the record at the current LSN is undoable
             if (record.isUndoable()) {
                 // get a compensation log record (CLR) by calling undo on the record
-                LogRecord CLR = record.undo(currentLSN);
+                LogRecord CLR = record.undo(lastRecordLSN);
                 // append the CLR
                 lastRecordLSN = logManager.appendToLog(CLR);
                 // call redo on the CLR to perform the undo
                 CLR.redo(this, diskSpaceManager, bufferManager);
             }
+            // if the current record is a CLR we can start rolling back
+            // from the next record that hasn't yet been undone.
+            currentLSN = record.getUndoNextLSN().orElse(record.getPrevLSN().orElse((long)-1));
         }
+        transactionEntry.lastLSN = lastRecordLSN;
     }
 
     /**
