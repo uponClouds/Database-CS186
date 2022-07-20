@@ -267,7 +267,21 @@ public class ARIESRecoveryManager implements RecoveryManager {
         assert (before.length == after.length);
         assert (before.length <= BufferManager.EFFECTIVE_PAGE_SIZE / 2);
         // TODO(proj5): implement
-        return -1L;
+        TransactionTableEntry transactionEntry = transactionTable.get(transNum);
+        assert (transactionEntry != null);
+
+        // Append new log record and update lastLSN
+        long prevLSN = transactionEntry.lastLSN;
+        LogRecord updateLogRecord = new UpdatePageLogRecord(transNum, pageNum, prevLSN, pageOffset, before, after);
+        long LSN = logManager.appendToLog(updateLogRecord);
+        transactionEntry.lastLSN = LSN;
+
+        // Update DPT if need
+        if (!dirtyPageTable.containsKey(pageNum)) {
+            dirtyPageTable.put(pageNum, LSN);
+        }
+
+        return LSN;
     }
 
     /**
@@ -443,7 +457,10 @@ public class ARIESRecoveryManager implements RecoveryManager {
         long savepointLSN = transactionEntry.getSavepoint(name);
 
         // TODO(proj5): implement
-        return;
+        Transaction.Status currStatus = transactionEntry.transaction.getStatus();
+        assert (currStatus == Transaction.Status.RUNNING);
+        rollbackToLSN(transNum, savepointLSN);
+
     }
 
     /**
@@ -471,9 +488,48 @@ public class ARIESRecoveryManager implements RecoveryManager {
 
         // TODO(proj5): generate end checkpoint record(s) for DPT and transaction table
 
-        // Last end checkpoint record
-        LogRecord endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+        int numDPTRecords = 0;
+        int numTxnTableRecords = 0;
+        LogRecord endRecord;
+
+         // Iterate through the dirtyPageTable and copy the entries. If at any point,
+         // copying the current record would cause the end checkpoint record to be too large,
+         // an end checkpoint record with the copied DPT entries should be appended to the log.
+        for (Map.Entry<Long, Long> dirtPage : dirtyPageTable.entrySet()) {
+            if (!EndCheckpointLogRecord.fitsInOneRecord(numDPTRecords + 1, 0)) {
+                endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+                logManager.appendToLog(endRecord);
+                chkptDPT.clear();
+                numDPTRecords = 0;
+            }
+            ++numDPTRecords;
+            chkptDPT.put(dirtPage.getKey(), dirtPage.getValue());
+        }
+
+        // Iterate through the transaction table, and copy the status/lastLSN,
+        // outputting end checkpoint records only as needed.
+        Pair<Transaction.Status, Long> txnInfo;
+        for (Map.Entry<Long, TransactionTableEntry> txnTable : transactionTable.entrySet()) {
+            if (!EndCheckpointLogRecord.fitsInOneRecord(numDPTRecords, numTxnTableRecords + 1)) {
+                endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+                logManager.appendToLog(endRecord);
+                chkptTxnTable.clear();
+                numTxnTableRecords = 0;
+                if (numDPTRecords != 0) {
+                    numDPTRecords = 0;
+                    chkptDPT.clear();
+                }
+            }
+            ++numTxnTableRecords;
+            txnInfo = new Pair<>(txnTable.getValue().transaction.getStatus(), txnTable.getValue().lastLSN);
+            chkptTxnTable.put(txnTable.getKey(), txnInfo);
+        }
+
+        // Case 1: this method is called by this.initialize()
+        // Case 2: there is still information left unlogged
+        endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
         logManager.appendToLog(endRecord);
+
         // Ensure checkpoint is fully flushed before updating the master record
         flushToLSN(endRecord.getLSN());
 
