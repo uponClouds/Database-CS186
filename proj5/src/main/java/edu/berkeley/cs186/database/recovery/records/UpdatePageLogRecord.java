@@ -67,6 +67,7 @@ public class UpdatePageLogRecord extends LogRecord {
         if (!isUndoable()) {
             throw new UnsupportedOperationException("cannot undo this record: " + this);
         }
+        // Return the CLR
         return new UndoUpdatePageLogRecord(transNum, pageNum, lastLSN, prevLSN, offset, before);
     }
 
